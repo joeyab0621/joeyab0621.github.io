@@ -21,5 +21,294 @@
     <script src="game.js"></script>
 </body>
 
+// ===== Canvas Setup =====
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
 
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+// ===== Game State =====
+let gameState = "start";
+
+// ===== Play Area =====
+const AREA_WIDTH = 360;
+const LEFT_WALL = () => canvas.width / 2 - AREA_WIDTH / 2;
+const RIGHT_WALL = () => canvas.width / 2 + AREA_WIDTH / 2;
+const DEAD_LINE = 100;
+
+// ===== Physics =====
+const GRAVITY = 0.4;
+const AIR_DRAG = 0.992;
+const FLOOR_FRICTION = 0.92;
+
+// ===== Fruits =====
+const FRUITS = [
+  { r: 10, color: "#ffd1dc", score: 1 },
+  { r: 14, color: "#ff9aa2", score: 3 },
+  { r: 20, color: "#ff6f69", score: 6 },
+  { r: 28, color: "#ff4e50", score: 10 },
+  { r: 38, color: "#cc0000", score: 20 },
+  { r: 52, color: "#228B22", score: 50 }
+];
+
+// ===== Data =====
+let fruits = [];
+let currentFruit = null;
+let nextType = 0;
+let score = 0;
+let highScore = Number(localStorage.getItem("suikaHigh")) || 0;
+let deadTimer = 0;
+
+// ===== Title Background =====
+let titleFruits = [];
+
+function createTitleFruits() {
+  titleFruits = [];
+  for (let i = 0; i < 15; i++) {
+    titleFruits.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: 20 + Math.random() * 30,
+      speed: 0.3 + Math.random() * 0.5
+    });
+  }
+}
+createTitleFruits();
+
+// ===== Fruit Class =====
+class Fruit {
+  constructor(x, y, type) {
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = 0;
+    this.type = type;
+    this.r = FRUITS[type].r;
+    this.color = FRUITS[type].color;
+  }
+
+  update() {
+    this.vy += GRAVITY;
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    this.vx *= AIR_DRAG;
+    this.vy *= AIR_DRAG;
+
+    // 壁
+    if (this.x - this.r < LEFT_WALL()) {
+      this.x = LEFT_WALL() + this.r;
+      this.vx *= -0.4;
+    }
+    if (this.x + this.r > RIGHT_WALL()) {
+      this.x = RIGHT_WALL() - this.r;
+      this.vx *= -0.4;
+    }
+
+    // 床
+    if (this.y + this.r > canvas.height) {
+      this.y = canvas.height - this.r;
+      this.vy *= -0.35;
+      this.vx *= FLOOR_FRICTION;
+    }
+  }
+
+  draw() {
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fillStyle = this.color;
+    ctx.fill();
+  }
+}
+
+// ===== Spawn =====
+function spawnFruit(x) {
+  currentFruit = new Fruit(x, 60, nextType);
+  nextType = Math.floor(Math.random() * 3);
+}
+
+// ===== Collision =====
+function handleCollisions() {
+  for (let i = 0; i < fruits.length; i++) {
+    for (let j = i + 1; j < fruits.length; j++) {
+
+      const a = fruits[i];
+      const b = fruits[j];
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = a.r + b.r;
+
+      if (dist < minDist && dist > 0) {
+
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const overlap = minDist - dist;
+
+        a.x -= nx * overlap / 2;
+        a.y -= ny * overlap / 2;
+        b.x += nx * overlap / 2;
+        b.y += ny * overlap / 2;
+
+        // 合体
+        if (a.type === b.type) {
+
+          const x = (a.x + b.x) / 2;
+          const y = (a.y + b.y) / 2;
+
+          if (a.type === FRUITS.length - 1) {
+            fruits.splice(j, 1);
+            fruits.splice(i, 1);
+            score += 200;
+            return;
+          }
+
+          score += FRUITS[a.type].score;
+          fruits.splice(j, 1);
+          fruits.splice(i, 1);
+          fruits.push(new Fruit(x, y, a.type + 1));
+          return;
+        }
+      }
+    }
+  }
+}
+
+// ===== Start Screen =====
+function drawStartScreen() {
+
+  ctx.fillStyle = "#fff5f7";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  titleFruits.forEach(f => {
+    f.y += f.speed;
+    if (f.y > canvas.height) f.y = -f.r;
+
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,0,0,0.15)";
+    ctx.fill();
+  });
+
+  ctx.fillStyle = "#ff4e50";
+  ctx.font = "bold 48px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("WATERMELON", canvas.width / 2, canvas.height / 2 - 40);
+  ctx.fillText("GAME 🍉", canvas.width / 2, canvas.height / 2 + 10);
+
+  ctx.fillStyle = "#333";
+  ctx.font = "20px Arial";
+  ctx.fillText("Click to Start", canvas.width / 2, canvas.height / 2 + 70);
+
+  ctx.font = "22px Arial";
+  ctx.fillText(`High Score: ${highScore}`, canvas.width / 2, canvas.height / 2 + 110);
+}
+
+// ===== UI =====
+function drawUI() {
+
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.fillRect(canvas.width / 2 - 110, 15, 220, 60);
+
+  ctx.fillStyle = "white";
+  ctx.font = "bold 20px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(`Score: ${score}`, canvas.width / 2, 40);
+  ctx.fillText(`High: ${highScore}`, canvas.width / 2, 65);
+
+  ctx.strokeStyle = "white";
+  ctx.strokeRect(LEFT_WALL(), 0, AREA_WIDTH, canvas.height);
+
+  ctx.strokeStyle = "red";
+  ctx.beginPath();
+  ctx.moveTo(LEFT_WALL(), DEAD_LINE);
+  ctx.lineTo(RIGHT_WALL(), DEAD_LINE);
+  ctx.stroke();
+}
+
+// ===== Update =====
+function update() {
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (gameState === "start") {
+    drawStartScreen();
+    requestAnimationFrame(update);
+    return;
+  }
+
+  fruits.forEach(f => f.update());
+  handleCollisions();
+
+  let danger = false;
+
+  fruits.forEach(f => {
+    f.draw();
+    if (f.y - f.r < DEAD_LINE) danger = true;
+  });
+
+  drawUI();
+
+  if (danger) {
+    deadTimer++;
+    if (deadTimer > 60) {
+
+      // ★ ハイスコア保存
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem("suikaHigh", highScore);
+      }
+
+      gameState = "start";
+      fruits = [];
+      score = 0;
+      deadTimer = 0;
+      createTitleFruits();
+      return;
+    }
+  } else {
+    deadTimer = 0;
+  }
+
+  if (currentFruit) currentFruit.draw();
+
+  requestAnimationFrame(update);
+}
+
+// ===== Controls =====
+canvas.addEventListener("mousemove", e => {
+  if (!currentFruit || gameState !== "play") return;
+
+  currentFruit.x = Math.max(
+    LEFT_WALL() + currentFruit.r,
+    Math.min(e.clientX, RIGHT_WALL() - currentFruit.r)
+  );
+});
+
+canvas.addEventListener("mousedown", () => {
+
+  if (gameState === "start") {
+    gameState = "play";
+    spawnFruit(canvas.width / 2);
+    return;
+  }
+
+  if (!currentFruit) return;
+
+  fruits.push(currentFruit);
+  currentFruit = null;
+
+  setTimeout(() => spawnFruit(canvas.width / 2), 400);
+});
+
+// ===== Start Loop =====
+update();
  
+
